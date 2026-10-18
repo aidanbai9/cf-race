@@ -38,14 +38,14 @@ export async function GET(req: NextRequest) {
   if (tour?.status !== "finished" && (!viewer || viewer.kicked_at)) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  const seatMatch = game.tournament_matches;
-  if (!game.finished_at && viewer && (viewer.id === seatMatch?.member_a || viewer.id === seatMatch?.member_b)) {
-    return NextResponse.json({ error: "finish your own game first" }, { status: 403 });
-  }
   if (!game.finished_at && Date.now() > Date.parse(game.ends_at)) {
     await tick(game.tournament_id);
     const again = await db().from("tournament_games").select("finished_at, winner_member_id").eq("id", gameId).maybeSingle();
     if (again.data) game = { ...game, ...again.data };
+  }
+  const seatMatch = game.tournament_matches;
+  if (!game.finished_at && viewer && (viewer.id === seatMatch?.member_a || viewer.id === seatMatch?.member_b)) {
+    return NextResponse.json({ error: "finish your own game first" }, { status: 403 });
   }
   const m = game.tournament_matches;
   const ids = [m?.member_a, m?.member_b].filter(Boolean) as string[];
