@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "./db";
 import { loadTournamentByCode, type TournamentMemberRow, type TournamentRow } from "./tournament";
 import { currentMember } from "./tournament-auth";
-import { normalizeCode } from "./tournament-format";
+import { MAX_PARTICIPANTS, normalizeCode } from "./tournament-format";
 
 export const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 
@@ -38,4 +38,19 @@ export async function nameTaken(
     .is("kicked_at", null)
     .ilike("name", name.replace(/[%_\\]/g, "\\$&"));
   return (data ?? []).some((m) => m.id !== exceptMemberId);
+}
+
+/** Whether the player list is full (ignoring `exceptMemberId`'s own seat). */
+export async function participantsFull(
+  tournamentId: string,
+  exceptMemberId: string
+): Promise<boolean> {
+  const { count } = await db()
+    .from("tournament_members")
+    .select("id", { count: "exact", head: true })
+    .eq("tournament_id", tournamentId)
+    .eq("role", "participant")
+    .is("kicked_at", null)
+    .neq("id", exceptMemberId);
+  return (count ?? 0) >= MAX_PARTICIPANTS;
 }

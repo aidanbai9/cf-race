@@ -11,6 +11,7 @@ create table public.tournaments (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
   name text not null,
+  tick_lease timestamptz,
   created_by uuid references auth.users (id) on delete set null,
   status text not null default 'lobby'
     check (status in ('lobby', 'running', 'finished')),
@@ -116,14 +117,9 @@ create or replace function public.record_tournament_ac(
 ) returns boolean
 language plpgsql
 as $$
-declare
-  stamped boolean;
 begin
-  update public.sessions
-    set outcome = 'solved', solve_ms = p_solve_ms, lang = p_lang
-    where id = p_session_id
-      and solve_ms is null;
-
+  -- Claim the game first: only the first AC before the game settles wins,
+  -- and only the winner's session is marked solved.
   update public.tournament_games
     set first_ac_at = p_submitted_at,
         winner_member_id = p_member_id,
@@ -131,9 +127,15 @@ begin
     where id = p_game_id
       and first_ac_at is null
       and finished_at is null;
-  stamped := found;
+  if not found then
+    return false;
+  end if;
 
-  return stamped;
+  update public.sessions
+    set outcome = 'solved', solve_ms = p_solve_ms, lang = p_lang
+    where id = p_session_id
+      and solve_ms is null;
+  return true;
 end;
 $$;
 

@@ -234,12 +234,13 @@ export async function startTournament(
 async function finishMatch(
   snap: TournamentSnapshot,
   match: TournamentMatchRow,
-  winner: Side,
+  winner: Side | null,
   decidedBy: NonNullable<TournamentMatchRow["decided_by"]>,
   extra: Partial<TournamentMatchRow> = {}
 ): Promise<boolean> {
-  const winnerId = memberOn(match, winner);
-  const loserId = memberOn(match, winner === "a" ? "b" : "a");
+  // A null winner (both players removed) leaves the next slot empty.
+  const winnerId = winner ? memberOn(match, winner) : null;
+  const loserId = winner ? memberOn(match, winner === "a" ? "b" : "a") : null;
   const { data: claimed } = await db()
     .from("tournament_matches")
     .update({
@@ -330,6 +331,13 @@ async function startGame(snap: TournamentSnapshot, match: TournamentMatchRow): P
     )
   );
   const [sa, sb] = sessions.map((s) => s.data?.id as string | undefined);
+  if (!sa || !sb) {
+    logDbError(`tournament: create sessions ${match.id}`, sessions.find((s) => s.error)?.error ?? null);
+    const made = [sa, sb].filter(Boolean) as string[];
+    if (made.length) await db().from("sessions").delete().in("id", made);
+    await db().from("tournament_matches").update({ status: "ready" }).eq("id", match.id).eq("status", "live");
+    return false;
+  }
   const { error } = await db()
     .from("tournament_games")
     .insert({
@@ -340,12 +348,13 @@ async function startGame(snap: TournamentSnapshot, match: TournamentMatchRow): P
       started_at: iso(startMs),
       ends_at: iso(startMs + match.game_sec * 1000),
       sudden_death: series.next.suddenDeath,
-      session_a: sa ?? null,
-      session_b: sb ?? null,
+      session_a: sa,
+      session_b: sb,
     });
   if (error) {
     logDbError(`tournament: start game ${match.id}`, error);
-    await db().from("tournament_matches").update({ status: "ready" }).eq("id", match.id);
+    await db().from("sessions").delete().in("id", [sa, sb]);
+    await db().from("tournament_matches").update({ status: "ready" }).eq("id", match.id).eq("status", "live");
     return false;
   }
   return true;
@@ -365,14 +374,14 @@ async function settleGame(
   snap: TournamentSnapshot,
   match: TournamentMatchRow,
   game: TournamentGameRow,
-  forced?: { winner: Side; decidedBy: "forfeit" | "admin" }
+  forced?: { winner: Side | null; decidedBy: "forfeit" | "admin" }
 ): Promise<boolean> {
   const now = Date.now();
   let winnerId = game.winner_member_id;
   let decidedBy = game.decided_by;
   let coin: CoinFlip | null = null;
   if (forced) {
-    winnerId = memberOn(match, forced.winner);
+    winnerId = forced.winner ? memberOn(match, forced.winner) : null;
     decidedBy = forced.decidedBy;
   } else if (!winnerId) {
     if (match.format === "single") {
@@ -383,7 +392,7 @@ async function settleGame(
       decidedBy = "draw";
     }
   }
-  const { data: claimed } = await db()
+  let settle = db()
     .from("tournament_games")
     .update({
       finished_at: iso(now),
@@ -392,8 +401,10 @@ async function settleGame(
       coin,
     })
     .eq("id", game.id)
-    .is("finished_at", null)
-    .select("id");
+    .is("finished_at", null);
+  // A timeout/draw loses to an AC that landed after our snapshot.
+  if (!forced && !game.first_ac_at) settle = settle.is("first_ac_at", null);
+  const { data: claimed } = await settle.select("id");
   if (!claimed?.length) return false;
 
   const unsolved = [game.session_a, game.session_b].filter(Boolean) as string[];
@@ -440,16 +451,24 @@ async function settleGame(
 function feedersDone(snap: TournamentSnapshot, match: TournamentMatchRow): boolean {
   const done = (m?: TournamentMatchRow) => m?.status === "done";
   const rounds = mainRounds(snap.matches);
+  const seated = (who: string | null, side: Side | null) =>
+    !who || !side || (side === "a" ? match.member_a : match.member_b) === who;
   if (match.bracket === "third") {
-    return snap.matches
-      .filter((m) => m.bracket === "main" && m.round === rounds - 1)
-      .every(done);
+    const semis = snap.matches.filter((m) => m.bracket === "main" && m.round === rounds - 1);
+    return semis.every(
+      (m) => done(m) && seated(m.loser_member_id, thirdPlaceSide(m.round, m.slot, rounds))
+    );
   }
   if (match.round === 1) return true;
-  // Rounds run together: wait for the whole previous round, not just feeders.
-  return snap.matches
-    .filter((m) => m.bracket === "main" && m.round === match.round - 1)
-    .every(done);
+  // Rounds run together: wait for the whole previous round, and for this
+  // match's feeders to have actually written their winners into our slots.
+  const prev = snap.matches.filter((m) => m.bracket === "main" && m.round === match.round - 1);
+  return (
+    prev.every(done) &&
+    prev
+      .filter((m) => m.slot >> 1 === match.slot)
+      .every((m) => seated(m.winner_member_id, nextMatch(m.round, m.slot, rounds)?.side ?? null))
+  );
 }
 
 /**
@@ -459,13 +478,28 @@ function feedersDone(snap: TournamentSnapshot, match: TournamentMatchRow): boole
  * every state poll and after every mutation.
  */
 export async function tick(tournamentId: string): Promise<void> {
-  for (let pass = 0; pass < 8; pass++) {
-    const snap = await loadSnapshot(tournamentId);
-    if (!snap || snap.tournament.status !== "running") return;
-    const changed = await tickOnce(snap);
-    if (!changed) return;
+  // One ticker at a time per tournament; a crashed holder's lease expires.
+  const nowIso = new Date().toISOString();
+  const { data: lease } = await db()
+    .from("tournaments")
+    .update({ tick_lease: new Date(Date.now() + TICK_LEASE_MS).toISOString() })
+    .eq("id", tournamentId)
+    .or(`tick_lease.is.null,tick_lease.lt.${nowIso}`)
+    .select("id");
+  if (!lease?.length) return;
+  try {
+    for (let pass = 0; pass < 8; pass++) {
+      const snap = await loadSnapshot(tournamentId);
+      if (!snap || snap.tournament.status !== "running") return;
+      const changed = await tickOnce(snap);
+      if (!changed) return;
+    }
+  } finally {
+    await db().from("tournaments").update({ tick_lease: null }).eq("id", tournamentId);
   }
 }
+
+const TICK_LEASE_MS = 15_000;
 
 async function tickOnce(snap: TournamentSnapshot): Promise<boolean> {
   const now = Date.now();
@@ -482,7 +516,9 @@ async function tickOnce(snap: TournamentSnapshot): Promise<boolean> {
     const aGone = match.member_a !== null && kicked.has(match.member_a);
     const bGone = match.member_b !== null && kicked.has(match.member_b);
     if ((aGone || bGone) && (match.status !== "pending" || feedersDone(snap, match))) {
-      const winner: Side = aGone && !bGone ? "b" : "a";
+      const aLive = match.member_a !== null && !aGone;
+      const bLive = match.member_b !== null && !bGone;
+      const winner: Side | null = aLive ? "a" : bLive ? "b" : null;
       if (currentGame) {
         changed = (await settleGame(snap, match, currentGame, { winner, decidedBy: "forfeit" })) || changed;
       } else {

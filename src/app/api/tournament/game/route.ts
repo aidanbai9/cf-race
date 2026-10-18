@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { buildSessionReplay } from "@/lib/session-log";
+import { currentMember } from "@/lib/tournament-auth";
 import { tick, type TournamentGameRow, type TournamentMemberRow } from "@/lib/tournament";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Review / live-spectate payload for one tournament game, in the duel review
- * shape so the DuelReview screen renders it. Anyone with the tournament link
- * can watch; nothing is returned before GO so the problem can't leak.
+ * shape so the DuelReview screen renders it. Members can watch live (except
+ * the two players in it); once the tournament ends replays are public.
+ * Nothing is returned before GO so the problem can't leak.
  */
 export async function GET(req: NextRequest) {
   const gameId = req.nextUrl.searchParams.get("gameId") ?? "";
@@ -26,6 +28,19 @@ export async function GET(req: NextRequest) {
     >();
   if (!game || Date.now() < Date.parse(game.started_at)) {
     return NextResponse.json({ error: "not started" }, { status: 404 });
+  }
+  const viewer = await currentMember(game.tournament_id);
+  const { data: tour } = await db()
+    .from("tournaments")
+    .select("status")
+    .eq("id", game.tournament_id)
+    .maybeSingle<{ status: string }>();
+  if (tour?.status !== "finished" && (!viewer || viewer.kicked_at)) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  const seatMatch = game.tournament_matches;
+  if (!game.finished_at && viewer && (viewer.id === seatMatch?.member_a || viewer.id === seatMatch?.member_b)) {
+    return NextResponse.json({ error: "finish your own game first" }, { status: 403 });
   }
   if (!game.finished_at && Date.now() > Date.parse(game.ends_at)) {
     await tick(game.tournament_id);

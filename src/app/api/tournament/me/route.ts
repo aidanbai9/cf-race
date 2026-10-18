@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { cleanName } from "@/lib/tournament-format";
-import { bad, nameTaken, readJson, tournamentFromCode } from "@/lib/tournament-route";
+import { bad, nameTaken, participantsFull, readJson, tournamentFromCode } from "@/lib/tournament-route";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,9 @@ export async function POST(req: NextRequest) {
     patch.name = name;
   }
   if (body.role === "participant" || body.role === "spectator") patch.role = body.role;
+  if (patch.role === "participant" && me.role !== "participant" && (await participantsFull(t.id, me.id))) {
+    return bad("The player list is full — stay a spectator");
+  }
   if (Object.keys(patch).length === 0) return bad("nothing to change");
   const { error } = await db().from("tournament_members").update(patch).eq("id", me.id);
   if (error) return bad(error.message, 500);

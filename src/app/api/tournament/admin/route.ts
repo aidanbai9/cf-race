@@ -7,8 +7,8 @@ import {
   startMatchNow,
   startTournament,
 } from "@/lib/tournament";
-import { MIN_PARTICIPANTS, cleanName } from "@/lib/tournament-format";
-import { bad, nameTaken, readJson, tournamentFromCode } from "@/lib/tournament-route";
+import { MAX_PARTICIPANTS, MIN_PARTICIPANTS, cleanName } from "@/lib/tournament-format";
+import { bad, nameTaken, participantsFull, readJson, tournamentFromCode } from "@/lib/tournament-route";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +31,9 @@ export async function POST(req: NextRequest) {
     if (t.status !== "lobby") return bad("Already started");
     if (participants(snap.members).length < MIN_PARTICIPANTS) {
       return bad(`Need at least ${MIN_PARTICIPANTS} participants`);
+    }
+    if (participants(snap.members).length > MAX_PARTICIPANTS) {
+      return bad(`At most ${MAX_PARTICIPANTS} participants — move some to spectators`);
     }
     const res = await startTournament(t, snap.members);
     if (!res.ok) return bad(res.error, res.status);
@@ -65,6 +68,9 @@ export async function POST(req: NextRequest) {
   } else if (action === "role") {
     if (t.status !== "lobby") return bad("Roles are locked once the tournament starts");
     const role = body.role === "spectator" ? "spectator" : "participant";
+    if (role === "participant" && target.role !== "participant" && (await participantsFull(t.id, target.id))) {
+      return bad(`The player list is full (${MAX_PARTICIPANTS})`);
+    }
     patch = { role };
   } else if (action === "admin") {
     if (target.is_owner) return bad("The host is always an admin");
