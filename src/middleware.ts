@@ -86,5 +86,8 @@ export const config = {
     "/api/duel/:path*",
     "/api/shares",
     "/api/events",
+    "/tournaments",
+    "/t/:path*",
+    "/api/tournament/:path*",
   ],
 };

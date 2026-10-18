@@ -305,6 +305,7 @@ export function DuelReview({
   readOnly = false,
   live = false,
   onExit,
+  exitLabel = "← lobby",
 }: {
   matchId?: string;
   /** Override the review data endpoint (e.g. public share tokens). */
@@ -315,6 +316,7 @@ export function DuelReview({
   live?: boolean;
   /** Embedded in another screen: render a back control that calls this. */
   onExit?: () => void;
+  exitLabel?: string;
 }) {
   const [data, setData] = useState<ReviewData | null | undefined>(undefined);
   const [clockMs, setClockMs] = useState(0);
@@ -524,7 +526,7 @@ export function DuelReview({
             onClick={onExit}
             className="font-mono text-xs text-primary hover:underline"
           >
-            ← lobby
+            {exitLabel}
           </button>
         ) : (
           !readOnly && (

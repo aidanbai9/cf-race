@@ -3,7 +3,7 @@ import { buildReplayEvents, fetchEditorEventRows } from "./editor-events";
 import type { Lang, Problem } from "./types";
 import type { TouristEvent } from "./tourist";
 
-export type SessionKind = "solo" | "duel" | "event";
+export type SessionKind = "solo" | "duel" | "event" | "tournament";
 
 /** Shape of GET /api/solo/replay responses (client + server share this). */
 export type SessionReplayResponse = {
