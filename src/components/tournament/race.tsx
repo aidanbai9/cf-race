@@ -76,7 +76,9 @@ export function TournamentRace({
     return (
       <main className="flex min-h-screen items-center justify-center">
         <CountdownOverlay startAtMs={game.startAtMs} serverNow={serverNow} />
-        <p className="animate-pulse font-mono text-sm text-muted-foreground">Problem revealed at GO…</p>
+        <p className="animate-pulse font-mono text-sm text-muted-foreground">
+          {serverNow() >= game.startAtMs ? "Loading problem…" : "Problem revealed at GO…"}
+        </p>
       </main>
     );
   }

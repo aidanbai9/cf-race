@@ -27,7 +27,7 @@ const COIN_FRESH_MS = 30_000;
 export function TournamentRoom({ code }: { code: string }) {
   const [state, setState] = useState<TournamentStateView | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [, setTick] = useState(0);
+  const [tickN, setTick] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [watching, setWatching] = useState<{ gameId: string; live: boolean } | null>(null);
   const [coinQueue, setCoinQueue] = useState<CoinFlipShow[]>([]);
@@ -57,6 +57,13 @@ export function TournamentRoom({ code }: { code: string }) {
     const iv = setInterval(() => setTick((t) => t + 1), 500);
     return () => clearInterval(iv);
   }, []);
+
+  // At GO the problem is only revealed by the next state fetch; don't wait for the 2s poll.
+  const awaitingProblem = Boolean(state?.myGame && !state.myGame.problem);
+  useEffect(() => {
+    if (awaitingProblem && state?.myGame && serverNow() >= state.myGame.startAtMs) void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickN, awaitingProblem]);
 
   const tid = state?.tournament.id;
   useEffect(() => {

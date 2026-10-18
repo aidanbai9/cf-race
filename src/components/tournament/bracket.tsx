@@ -143,18 +143,22 @@ export function BracketView({
         onPointerDown={(e) => {
           if ((e.target as HTMLElement).closest("button")) return;
           drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false };
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         }}
         onPointerMove={(e) => {
           const d = drag.current;
           if (!d) return;
           const dx = e.clientX - d.x;
           const dy = e.clientY - d.y;
-          if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
+          if (!d.moved && Math.abs(dx) + Math.abs(dy) > 3) {
+            d.moved = true;
+            // Capture only once it's a drag, so plain clicks still reach the cards.
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          }
+          if (!d.moved) return;
           setView((v) => ({ ...v, x: d.vx + dx, y: d.vy + dy }));
         }}
         onPointerUp={() => {
-          drag.current = null;
+          setTimeout(() => (drag.current = null), 0);
         }}
       >
         <div
