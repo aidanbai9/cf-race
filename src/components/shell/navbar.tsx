@@ -17,6 +17,7 @@ const LINKS = [
   { href: "/sessions", label: "Sessions", match: ["/sessions", "/replay", "/r"] },
   { href: "/duels", label: "Duels", match: ["/duels", "/duel"] },
   { href: "/events", label: "Events", match: ["/events", "/e"] },
+  { href: "/tournaments", label: "Tournaments", match: ["/tournaments", "/t"] },
 ];
 
 function isActive(pathname: string | null, prefixes: string[]) {
