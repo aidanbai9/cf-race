@@ -339,7 +339,7 @@ function Header({ state }: { state: TournamentStateView }) {
       <div className="min-w-0 flex-1">
         <p className="font-mono text-xs uppercase tracking-[0.3em] text-primary">Tournament</p>
         <h1 className="truncate text-3xl font-bold tracking-tight">{t.name}</h1>
-        <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <Badge variant={t.status === "running" ? "default" : "secondary"}>
             {t.status === "lobby" ? "Lobby — open to join" : t.status === "running" ? "In progress" : "Finished"}
           </Badge>
@@ -350,7 +350,7 @@ function Header({ state }: { state: TournamentStateView }) {
               {state.me.isAdmin ? " (admin)" : ""}
             </span>
           )}
-        </p>
+        </div>
       </div>
       <div className="flex items-center gap-2">
         <button
